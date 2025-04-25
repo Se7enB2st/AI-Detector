@@ -2,6 +2,7 @@ from transformers import pipeline
 from typing import Tuple, Dict
 import logging
 import sys
+import argparse
 from transformers.pipelines.base import PipelineException
 
 # Configure logging
@@ -68,37 +69,84 @@ class AIDetector:
             logger.error(f"Unexpected error during detection: {str(e)}")
             raise RuntimeError(f"An unexpected error occurred: {str(e)}")
 
-def main():
+def process_file(file_path: str, detector: AIDetector) -> None:
+    """
+    Process a text file and detect AI content.
+    
+    Args:
+        file_path (str): Path to the text file
+        detector (AIDetector): Initialized AI detector instance
+    """
     try:
-        # Example usage
+        with open(file_path, 'r', encoding='utf-8') as file:
+            text = file.read()
+            label, confidence = detector.detect(text)
+            print(f"\nFile: {file_path}")
+            print(f"Prediction: {label}")
+            print(f"Confidence: {confidence:.2f}")
+    except FileNotFoundError:
+        print(f"Error: File '{file_path}' not found")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error processing file: {str(e)}")
+        sys.exit(1)
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="AI Text Detector - Detect whether text is AI-generated or human-written",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Analyze text directly
+  python ai_detector.py --text "Your text here"
+  
+  # Analyze text from a file
+  python ai_detector.py --file input.txt
+  
+  # Run in interactive mode
+  python ai_detector.py --interactive
+        """
+    )
+    
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--text', type=str, help='Text to analyze')
+    group.add_argument('--file', type=str, help='Path to text file to analyze')
+    group.add_argument('--interactive', action='store_true', help='Run in interactive mode')
+    
+    args = parser.parse_args()
+    
+    try:
         detector = AIDetector()
         
-        # Example texts
-        ai_text = "The quick brown fox jumps over the lazy dog. This is a common example sentence used for testing."
-        human_text = "I went to the store yesterday and bought some groceries. The weather was nice, so I walked home."
-        
-        # Test AI detection
-        print("Testing AI detection...")
-        print("\nAI-generated text example:")
-        label, confidence = detector.detect(ai_text)
-        print(f"Prediction: {label} (Confidence: {confidence:.2f})")
-        
-        print("\nHuman-written text example:")
-        label, confidence = detector.detect(human_text)
-        print(f"Prediction: {label} (Confidence: {confidence:.2f})")
-        
-        # Test error handling
-        print("\nTesting error handling...")
-        try:
-            detector.detect("")  # Empty text
-        except ValueError as e:
-            print(f"Expected error caught: {str(e)}")
+        if args.text:
+            label, confidence = detector.detect(args.text)
+            print(f"\nPrediction: {label}")
+            print(f"Confidence: {confidence:.2f}")
             
-        try:
-            detector.detect(123)  # Invalid input type
-        except ValueError as e:
-            print(f"Expected error caught: {str(e)}")
+        elif args.file:
+            process_file(args.file, detector)
             
+        elif args.interactive:
+            print("\nAI Text Detector - Interactive Mode")
+            print("Type 'exit' to quit")
+            print("-" * 50)
+            
+            while True:
+                text = input("\nEnter text to analyze: ").strip()
+                if text.lower() == 'exit':
+                    break
+                    
+                if not text:
+                    print("Please enter some text")
+                    continue
+                    
+                try:
+                    label, confidence = detector.detect(text)
+                    print(f"\nPrediction: {label}")
+                    print(f"Confidence: {confidence:.2f}")
+                except Exception as e:
+                    print(f"Error: {str(e)}")
+    
     except Exception as e:
         logger.error(f"Error in main function: {str(e)}")
         sys.exit(1)
