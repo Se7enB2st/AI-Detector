@@ -1,4 +1,5 @@
-from transformers import pipeline
+from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+import torch
 from typing import Tuple, Dict, List
 import logging
 import sys
@@ -6,6 +7,9 @@ import argparse
 import json
 from pathlib import Path
 from transformers.pipelines.base import PipelineException
+import numpy as np
+from textstat import textstat
+import re
 
 # Configure logging
 logging.basicConfig(
@@ -17,25 +21,71 @@ logger = logging.getLogger(__name__)
 class AIDetector:
     def __init__(self):
         """
-        Initialize the AI detector using the roberta-base-openai-detector model.
+        Initialize the AI detector using multiple models and analysis techniques.
         
         Raises:
             RuntimeError: If model initialization fails
         """
         try:
-            self.classifier = pipeline(
-                "text-classification",
-                model="roberta-base-openai-detector",
-                device=-1  # Use CPU by default
-            )
+            # Initialize multiple models for ensemble detection
+            self.models = {
+                'gpt2': pipeline(
+                    "text-classification",
+                    model="microsoft/DialogRPT-human-vs-rand",
+                    device=-1
+                ),
+                'roberta': pipeline(
+                    "text-classification",
+                    model="roberta-base-openai-detector",
+                    device=-1
+                )
+            }
+            
+            # Initialize tokenizer for additional analysis
+            self.tokenizer = AutoTokenizer.from_pretrained("gpt2")
+            
             logger.info("AI detector initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize AI detector: {str(e)}")
             raise RuntimeError(f"Failed to initialize AI detector: {str(e)}")
     
+    def _analyze_text_features(self, text: str) -> Dict[str, float]:
+        """
+        Analyze various text features that might indicate AI generation.
+        
+        Args:
+            text (str): The text to analyze
+            
+        Returns:
+            Dict[str, float]: Dictionary of feature scores
+        """
+        features = {}
+        
+        # Calculate perplexity-like score
+        tokens = self.tokenizer(text, return_tensors="pt")
+        input_ids = tokens["input_ids"]
+        attention_mask = tokens["attention_mask"]
+        
+        # Calculate average token probability
+        with torch.no_grad():
+            outputs = self.models['gpt2'].model(input_ids, attention_mask=attention_mask)
+            logits = outputs.logits
+            probs = torch.softmax(logits, dim=-1)
+            avg_prob = probs.mean().item()
+        
+        features['token_probability'] = avg_prob
+        
+        # Calculate text statistics
+        features['readability'] = textstat.flesch_reading_ease(text)
+        features['sentence_length'] = len(re.split(r'[.!?]+', text))
+        features['word_length'] = len(text.split())
+        features['avg_word_length'] = np.mean([len(word) for word in text.split()])
+        
+        return features
+    
     def detect(self, text: str) -> Tuple[str, float]:
         """
-        Detect whether the given text is AI-generated or human-written.
+        Detect whether the given text is AI-generated or human-written using ensemble methods.
         
         Args:
             text (str): The text to analyze
@@ -57,12 +107,43 @@ class AIDetector:
             if len(text) < 10:
                 logger.warning("Input text is very short, which may affect detection accuracy")
             
-            result = self.classifier(text)[0]
-            label = "AI" if result["label"] == "LABEL_1" else "Human"
-            confidence = result["score"]
+            # Get predictions from multiple models
+            predictions = []
+            confidences = []
             
-            logger.info(f"Detection completed: {label} (Confidence: {confidence:.2f})")
-            return label, confidence
+            for model_name, model in self.models.items():
+                result = model(text)[0]
+                label = "AI" if result["label"] == "LABEL_1" else "Human"
+                confidence = result["score"]
+                predictions.append(label)
+                confidences.append(confidence)
+            
+            # Analyze text features
+            features = self._analyze_text_features(text)
+            
+            # Calculate final score using ensemble method
+            final_confidence = np.mean(confidences)
+            
+            # Adjust confidence based on text features
+            if features['token_probability'] > 0.5:
+                final_confidence *= 1.2  # Increase confidence if token probability is high
+            if features['readability'] > 80:
+                final_confidence *= 0.8  # Decrease confidence if text is very readable
+            
+            # Determine final label
+            ai_count = predictions.count("AI")
+            human_count = predictions.count("Human")
+            
+            if ai_count > human_count:
+                final_label = "AI"
+            else:
+                final_label = "Human"
+            
+            # Ensure confidence is between 0 and 1
+            final_confidence = min(max(final_confidence, 0), 1)
+            
+            logger.info(f"Detection completed: {final_label} (Confidence: {final_confidence:.2f})")
+            return final_label, final_confidence
             
         except PipelineException as e:
             logger.error(f"Pipeline error during detection: {str(e)}")
