@@ -10,44 +10,164 @@ from transformers.pipelines.base import PipelineException
 import numpy as np
 from textstat import textstat
 import re
+import html
+import os
+from typing import Optional
+import hashlib
 
-# Configure logging
+# Configure logging with security in mind
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
+class SecurityError(Exception):
+    """Custom exception for security-related errors"""
+    pass
+
 class AIDetector:
-    def __init__(self):
+    def __init__(self, max_text_length: int = 10000, max_file_size: int = 1024 * 1024):
         """
-        Initialize the AI detector using multiple models and analysis techniques.
+        Initialize the AI detector with security parameters.
         
+        Args:
+            max_text_length (int): Maximum allowed text length in characters
+            max_file_size (int): Maximum allowed file size in bytes
+            
         Raises:
             RuntimeError: If model initialization fails
+            SecurityError: If security checks fail
         """
         try:
-            # Initialize multiple models for ensemble detection
+            # Security: Validate initialization parameters
+            if max_text_length <= 0 or max_file_size <= 0:
+                raise SecurityError("Invalid security parameters")
+            
+            self.max_text_length = max_text_length
+            self.max_file_size = max_file_size
+            
+            # Initialize models with security in mind
             self.models = {
                 'gpt2': pipeline(
                     "text-classification",
                     model="microsoft/DialogRPT-human-vs-rand",
-                    device=-1
+                    device=-1,
+                    max_length=512,  # Limit input length
+                    truncation=True
                 ),
                 'roberta': pipeline(
                     "text-classification",
                     model="roberta-base-openai-detector",
-                    device=-1
+                    device=-1,
+                    max_length=512,  # Limit input length
+                    truncation=True
                 )
             }
             
-            # Initialize tokenizer for additional analysis
             self.tokenizer = AutoTokenizer.from_pretrained("gpt2")
             
-            logger.info("AI detector initialized successfully")
+            # Initialize security-related attributes
+            self._last_request_time = 0
+            self._request_count = 0
+            self._rate_limit = 100  # requests per minute
+            
+            logger.info("AI detector initialized with security parameters")
         except Exception as e:
-            logger.error(f"Failed to initialize AI detector: {str(e)}")
-            raise RuntimeError(f"Failed to initialize AI detector: {str(e)}")
+            logger.error(f"Security initialization failed: {str(e)}")
+            raise SecurityError(f"Security initialization failed: {str(e)}")
+    
+    def _sanitize_input(self, text: str) -> str:
+        """
+        Sanitize input text to prevent injection attacks.
+        
+        Args:
+            text (str): Input text to sanitize
+            
+        Returns:
+            str: Sanitized text
+            
+        Raises:
+            SecurityError: If text contains suspicious patterns
+        """
+        # Remove null bytes and control characters
+        text = ''.join(char for char in text if ord(char) >= 32)
+        
+        # Check for suspicious patterns
+        suspicious_patterns = [
+            r'<script.*?>.*?</script>',
+            r'javascript:',
+            r'data:text/html',
+            r'eval\s*\(',
+            r'exec\s*\(',
+            r'from\s+os\s+import',
+            r'import\s+os',
+            r'__import__\s*\('
+        ]
+        
+        for pattern in suspicious_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                raise SecurityError("Suspicious pattern detected in input")
+        
+        # HTML escape the text
+        text = html.escape(text)
+        
+        return text
+    
+    def _validate_file(self, file_path: str) -> None:
+        """
+        Validate file before processing.
+        
+        Args:
+            file_path (str): Path to the file
+            
+        Raises:
+            SecurityError: If file validation fails
+        """
+        try:
+            # Check if file exists and is accessible
+            if not os.path.exists(file_path):
+                raise SecurityError("File does not exist")
+            
+            # Check file size
+            file_size = os.path.getsize(file_path)
+            if file_size > self.max_file_size:
+                raise SecurityError(f"File size exceeds maximum allowed size of {self.max_file_size} bytes")
+            
+            # Check file extension
+            if not file_path.lower().endswith('.txt'):
+                raise SecurityError("Only .txt files are allowed")
+            
+            # Check file permissions
+            if not os.access(file_path, os.R_OK):
+                raise SecurityError("File is not readable")
+            
+        except Exception as e:
+            raise SecurityError(f"File validation failed: {str(e)}")
+    
+    def _check_rate_limit(self) -> None:
+        """
+        Implement rate limiting to prevent abuse.
+        
+        Raises:
+            SecurityError: If rate limit is exceeded
+        """
+        import time
+        current_time = time.time()
+        
+        # Reset counter if more than a minute has passed
+        if current_time - self._last_request_time > 60:
+            self._request_count = 0
+            self._last_request_time = current_time
+        
+        # Check rate limit
+        self._request_count += 1
+        if self._request_count > self._rate_limit:
+            raise SecurityError("Rate limit exceeded")
     
     def _analyze_text_features(self, text: str) -> Dict[str, float]:
         """
@@ -85,7 +205,7 @@ class AIDetector:
     
     def detect(self, text: str) -> Tuple[str, float]:
         """
-        Detect whether the given text is AI-generated or human-written using ensemble methods.
+        Detect whether the given text is AI-generated or human-written with security checks.
         
         Args:
             text (str): The text to analyze
@@ -94,16 +214,28 @@ class AIDetector:
             Tuple[str, float]: A tuple containing the prediction label and confidence score
             
         Raises:
+            SecurityError: If security checks fail
             ValueError: If input text is empty or invalid
             RuntimeError: If detection fails
         """
         try:
+            # Security: Check rate limit
+            self._check_rate_limit()
+            
+            # Security: Validate input
             if not isinstance(text, str):
                 raise ValueError("Input must be a string")
-                
+            
             if not text.strip():
                 raise ValueError("Input text cannot be empty")
             
+            if len(text) > self.max_text_length:
+                raise SecurityError(f"Text length exceeds maximum allowed length of {self.max_text_length} characters")
+            
+            # Security: Sanitize input
+            text = self._sanitize_input(text)
+            
+            # Rest of the detection logic remains the same
             if len(text) < 10:
                 logger.warning("Input text is very short, which may affect detection accuracy")
             
@@ -126,9 +258,9 @@ class AIDetector:
             
             # Adjust confidence based on text features
             if features['token_probability'] > 0.5:
-                final_confidence *= 1.2  # Increase confidence if token probability is high
+                final_confidence *= 1.2
             if features['readability'] > 80:
-                final_confidence *= 0.8  # Decrease confidence if text is very readable
+                final_confidence *= 0.8
             
             # Determine final label
             ai_count = predictions.count("AI")
@@ -142,9 +274,13 @@ class AIDetector:
             # Ensure confidence is between 0 and 1
             final_confidence = min(max(final_confidence, 0), 1)
             
+            # Log the detection result (without sensitive data)
             logger.info(f"Detection completed: {final_label} (Confidence: {final_confidence:.2f})")
             return final_label, final_confidence
             
+        except SecurityError as e:
+            logger.error(f"Security error during detection: {str(e)}")
+            raise
         except PipelineException as e:
             logger.error(f"Pipeline error during detection: {str(e)}")
             raise RuntimeError(f"Failed to process text: {str(e)}")

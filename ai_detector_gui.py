@@ -1,8 +1,10 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext, filedialog, messagebox
-from ai_detector import AIDetector
+from ai_detector import AIDetector, SecurityError
 import threading
 import os
+import logging
+from datetime import datetime
 
 class AIDetectorGUI:
     def __init__(self, root):
@@ -11,8 +13,24 @@ class AIDetectorGUI:
         self.root.geometry("800x600")
         self.root.minsize(600, 400)
         
-        # Initialize the AI detector
-        self.detector = AIDetector()
+        # Configure security logging
+        self.log_file = f"security_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        self.security_logger = logging.getLogger('security')
+        self.security_logger.setLevel(logging.INFO)
+        handler = logging.FileHandler(self.log_file)
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        self.security_logger.addHandler(handler)
+        
+        # Initialize the AI detector with security parameters
+        try:
+            self.detector = AIDetector(
+                max_text_length=10000,  # 10KB max text length
+                max_file_size=1024 * 1024  # 1MB max file size
+            )
+        except SecurityError as e:
+            messagebox.showerror("Security Error", f"Failed to initialize detector: {str(e)}")
+            self.root.destroy()
+            return
         
         # Create main frame
         self.main_frame = ttk.Frame(root, padding="10")
@@ -40,6 +58,14 @@ class AIDetectorGUI:
         self.status_var.set("Ready")
         self.status_bar = ttk.Label(root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Security info
+        self.security_info = ttk.Label(root, text="Security: Active", foreground="green")
+        self.security_info.pack(side=tk.BOTTOM, fill=tk.X)
+
+    def _log_security_event(self, event_type: str, details: str):
+        """Log security-related events"""
+        self.security_logger.info(f"{event_type}: {details}")
 
     def _create_text_tab(self):
         # Text input area
@@ -97,21 +123,34 @@ class AIDetectorGUI:
         
         def analyze():
             try:
+                self._log_security_event("Text Analysis", "Starting text analysis")
                 label, confidence = self.detector.detect(text)
                 self.text_result.config(text=f"Result: {label} (Confidence: {confidence:.2%})")
                 self.status_var.set("Analysis complete")
+                self._log_security_event("Text Analysis", f"Completed: {label} ({confidence:.2%})")
+            except SecurityError as e:
+                self._log_security_event("Security Error", str(e))
+                self.text_result.config(text=f"Security Error: {str(e)}")
+                self.status_var.set("Security error occurred")
+                messagebox.showerror("Security Error", str(e))
             except Exception as e:
+                self._log_security_event("Error", str(e))
                 self.text_result.config(text=f"Error: {str(e)}")
                 self.status_var.set("Error occurred")
         
         threading.Thread(target=analyze).start()
 
     def _select_file(self):
-        file_path = filedialog.askopenfilename(
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
-        )
-        if file_path:
-            self.file_path_var.set(file_path)
+        try:
+            file_path = filedialog.askopenfilename(
+                filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+            )
+            if file_path:
+                self._log_security_event("File Selection", f"Selected file: {file_path}")
+                self.file_path_var.set(file_path)
+        except Exception as e:
+            self._log_security_event("File Selection Error", str(e))
+            messagebox.showerror("Error", f"Failed to select file: {str(e)}")
 
     def _analyze_file(self):
         file_path = self.file_path_var.get()
@@ -124,21 +163,34 @@ class AIDetectorGUI:
         
         def analyze():
             try:
+                self._log_security_event("File Analysis", f"Starting analysis of {file_path}")
                 with open(file_path, 'r', encoding='utf-8') as file:
                     text = file.read()
                 label, confidence = self.detector.detect(text)
                 self.file_result.config(text=f"Result: {label} (Confidence: {confidence:.2%})")
                 self.status_var.set("Analysis complete")
+                self._log_security_event("File Analysis", f"Completed: {label} ({confidence:.2%})")
+            except SecurityError as e:
+                self._log_security_event("Security Error", str(e))
+                self.file_result.config(text=f"Security Error: {str(e)}")
+                self.status_var.set("Security error occurred")
+                messagebox.showerror("Security Error", str(e))
             except Exception as e:
+                self._log_security_event("Error", str(e))
                 self.file_result.config(text=f"Error: {str(e)}")
                 self.status_var.set("Error occurred")
         
         threading.Thread(target=analyze).start()
 
     def _select_directory(self):
-        dir_path = filedialog.askdirectory()
-        if dir_path:
-            self.dir_path_var.set(dir_path)
+        try:
+            dir_path = filedialog.askdirectory()
+            if dir_path:
+                self._log_security_event("Directory Selection", f"Selected directory: {dir_path}")
+                self.dir_path_var.set(dir_path)
+        except Exception as e:
+            self._log_security_event("Directory Selection Error", str(e))
+            messagebox.showerror("Error", f"Failed to select directory: {str(e)}")
 
     def _analyze_directory(self):
         dir_path = self.dir_path_var.get()
@@ -152,6 +204,7 @@ class AIDetectorGUI:
         
         def analyze():
             try:
+                self._log_security_event("Batch Analysis", f"Starting analysis of directory: {dir_path}")
                 results = []
                 for filename in os.listdir(dir_path):
                     if filename.endswith('.txt'):
@@ -161,18 +214,25 @@ class AIDetectorGUI:
                                 text = file.read()
                             label, confidence = self.detector.detect(text)
                             results.append(f"{filename}: {label} (Confidence: {confidence:.2%})\n")
+                            self._log_security_event("File Analysis", f"Completed {filename}: {label} ({confidence:.2%})")
+                        except SecurityError as e:
+                            self._log_security_event("Security Error", f"{filename}: {str(e)}")
+                            results.append(f"{filename}: Security Error - {str(e)}\n")
                         except Exception as e:
+                            self._log_security_event("Error", f"{filename}: {str(e)}")
                             results.append(f"{filename}: Error - {str(e)}\n")
                 
                 self.batch_result.delete("1.0", tk.END)
                 for result in results:
                     self.batch_result.insert(tk.END, result)
                 self.status_var.set("Analysis complete")
+                self._log_security_event("Batch Analysis", "Completed directory analysis")
             except Exception as e:
+                self._log_security_event("Error", str(e))
                 self.batch_result.delete("1.0", tk.END)
                 self.batch_result.insert(tk.END, f"Error: {str(e)}")
                 self.status_var.set("Error occurred")
-        
+
         threading.Thread(target=analyze).start()
 
 def main():
