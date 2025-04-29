@@ -1,17 +1,27 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext, filedialog, messagebox
 from ai_detector import AIDetector, SecurityError
+from config import Config
+from settings_dialog import SettingsDialog
 import threading
 import os
 import logging
 from datetime import datetime
+import shutil
+from pathlib import Path
 
 class AIDetectorGUI:
     def __init__(self, root):
         self.root = root
+        self.config = Config()
+        
+        # Apply UI settings
         self.root.title("AI Text Detector")
-        self.root.geometry("800x600")
-        self.root.minsize(600, 400)
+        self.root.geometry(f"{self.config.get('ui.window_size.width')}x{self.config.get('ui.window_size.height')}")
+        self.root.minsize(
+            self.config.get('ui.min_window_size.width'),
+            self.config.get('ui.min_window_size.height')
+        )
         
         # Configure security logging
         self.log_file = f"security_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -24,13 +34,16 @@ class AIDetectorGUI:
         # Initialize the AI detector with security parameters
         try:
             self.detector = AIDetector(
-                max_text_length=10000,  # 10KB max text length
-                max_file_size=1024 * 1024  # 1MB max file size
+                max_text_length=self.config.get('security.max_text_length'),
+                max_file_size=self.config.get('security.max_file_size')
             )
         except SecurityError as e:
             messagebox.showerror("Security Error", f"Failed to initialize detector: {str(e)}")
             self.root.destroy()
             return
+        
+        # Create menu bar
+        self._create_menu_bar()
         
         # Create main frame
         self.main_frame = ttk.Frame(root, padding="10")
@@ -62,6 +75,120 @@ class AIDetectorGUI:
         # Security info
         self.security_info = ttk.Label(root, text="Security: Active", foreground="green")
         self.security_info.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # Clean up old logs
+        self._cleanup_old_logs()
+
+    def _create_menu_bar(self):
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+        
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Settings", command=self._show_settings)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.quit)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About", command=self._show_about)
+        help_menu.add_command(label="Documentation", command=self._show_documentation)
+    
+    def _show_settings(self):
+        def on_save():
+            # Reinitialize detector with new settings
+            try:
+                self.detector = AIDetector(
+                    max_text_length=self.config.get('security.max_text_length'),
+                    max_file_size=self.config.get('security.max_file_size')
+                )
+                # Update UI
+                self._update_ui_settings()
+            except SecurityError as e:
+                messagebox.showerror("Error", f"Failed to apply settings: {str(e)}")
+        
+        SettingsDialog(self.root, self.config, on_save)
+    
+    def _update_ui_settings(self):
+        # Update theme
+        theme = self.config.get('ui.theme')
+        if theme == 'dark':
+            # Apply dark theme
+            self.root.tk_setPalette(background='#2b2b2b', foreground='#ffffff')
+        else:
+            # Apply light theme
+            self.root.tk_setPalette(background='#ffffff', foreground='#000000')
+        
+        # Update font size
+        font_size = self.config.get('ui.font_size')
+        style = ttk.Style()
+        style.configure('.', font=('TkDefaultFont', font_size))
+    
+    def _show_about(self):
+        about_text = """
+AI Text Detector
+
+Version: 1.0.0
+Author: Your Name
+
+This tool helps detect AI-generated text using multiple models
+and analysis techniques. It provides a user-friendly interface
+for analyzing text, files, and directories.
+
+Security features:
+- Input validation and sanitization
+- Rate limiting
+- File type restrictions
+- Comprehensive logging
+"""
+        messagebox.showinfo("About", about_text)
+    
+    def _show_documentation(self):
+        doc_text = """
+Documentation
+
+1. Text Input Tab:
+   - Enter text directly in the text area
+   - Click 'Analyze Text' to process
+   - Results show AI/Human classification and confidence
+
+2. File Input Tab:
+   - Select a text file to analyze
+   - Click 'Analyze File' to process
+   - Results show classification for the entire file
+
+3. Batch Processing Tab:
+   - Select a directory containing text files
+   - Click 'Analyze Directory' to process all files
+   - Results show classification for each file
+
+Settings:
+- Security: Configure limits and restrictions
+- Models: Choose and configure detection models
+- UI: Customize appearance and behavior
+- Analysis: Adjust detection parameters
+
+For more information, visit the project repository.
+"""
+        messagebox.showinfo("Documentation", doc_text)
+    
+    def _cleanup_old_logs(self):
+        log_dir = Path(".")
+        retention_days = self.config.get('security.log_retention_days')
+        current_time = datetime.now()
+        
+        for log_file in log_dir.glob("security_log_*.log"):
+            try:
+                # Extract date from filename
+                date_str = log_file.stem.split('_')[2:4]  # Get date and time parts
+                if len(date_str) == 2:
+                    file_date = datetime.strptime('_'.join(date_str), '%Y%m%d_%H%M%S')
+                    if (current_time - file_date).days > retention_days:
+                        log_file.unlink()
+            except Exception as e:
+                self._log_security_event("Log Cleanup Error", str(e))
 
     def _log_security_event(self, event_type: str, details: str):
         """Log security-related events"""
