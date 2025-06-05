@@ -201,8 +201,15 @@ For more information, visit the project repository.
         self.text_input = scrolledtext.ScrolledText(self.text_tab, height=10)
         self.text_input.pack(fill=tk.BOTH, expand=True, pady=5)
         
+        # Button frame
+        button_frame = ttk.Frame(self.text_tab)
+        button_frame.pack(fill=tk.X, pady=5)
+        
         # Analyze button
-        ttk.Button(self.text_tab, text="Analyze Text", command=self._analyze_text).pack(pady=5)
+        ttk.Button(button_frame, text="Analyze Text", command=self._analyze_text).pack(side=tk.LEFT, padx=5)
+        
+        # Clear button
+        ttk.Button(button_frame, text="Clear", command=lambda: self._clear_results('text')).pack(side=tk.LEFT, padx=5)
         
         # Results area
         self.text_result = ttk.Label(self.text_tab, text="")
@@ -217,8 +224,15 @@ For more information, visit the project repository.
         self.file_path_var = tk.StringVar()
         ttk.Entry(file_frame, textvariable=self.file_path_var, state='readonly').pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
+        # Button frame
+        button_frame = ttk.Frame(self.file_tab)
+        button_frame.pack(fill=tk.X, pady=5)
+        
         # Analyze button
-        ttk.Button(self.file_tab, text="Analyze File", command=self._analyze_file).pack(pady=5)
+        ttk.Button(button_frame, text="Analyze File", command=self._analyze_file).pack(side=tk.LEFT, padx=5)
+        
+        # Clear button
+        ttk.Button(button_frame, text="Clear", command=lambda: self._clear_results('file')).pack(side=tk.LEFT, padx=5)
         
         # Results area
         self.file_result = ttk.Label(self.file_tab, text="")
@@ -252,6 +266,9 @@ For more information, visit the project repository.
         # Export to CSV button
         self.export_button = ttk.Button(button_frame, text="Export to CSV", command=self._export_to_csv, state=tk.DISABLED)
         self.export_button.pack(side=tk.LEFT, padx=5)
+        
+        # Clear button
+        ttk.Button(button_frame, text="Clear", command=lambda: self._clear_results('batch')).pack(side=tk.LEFT, padx=5)
         
         # Results area
         self.batch_result = scrolledtext.ScrolledText(self.batch_tab, height=15)
@@ -457,6 +474,26 @@ For more information, visit the project repository.
                 self.progress_var.set(0)
 
         threading.Thread(target=analyze).start()
+
+    def _clear_results(self, tab_type):
+        """Clear results and reset interface for the specified tab"""
+        if tab_type == 'text':
+            self.text_input.delete("1.0", tk.END)
+            self.text_result.config(text="")
+            self.status_var.set("Text input cleared")
+        elif tab_type == 'file':
+            self.file_path_var.set("")
+            self.file_result.config(text="")
+            self.status_var.set("File selection cleared")
+        elif tab_type == 'batch':
+            self.dir_path_var.set("")
+            self.batch_result.delete("1.0", tk.END)
+            self.progress_var.set(0)
+            self.copy_batch_button.config(state=tk.DISABLED)
+            self.export_button.config(state=tk.DISABLED)
+            self.status_var.set("Batch results cleared")
+        
+        self._log_security_event("Clear Results", f"Cleared {tab_type} tab results")
 
 def main():
     root = tk.Tk()
