@@ -237,12 +237,29 @@ For more information, visit the project repository.
         self.progress_bar = ttk.Progressbar(self.batch_tab, variable=self.progress_var, maximum=100)
         self.progress_bar.pack(fill=tk.X, padx=5, pady=5)
         
+        # Button frame for Analyze and Copy buttons
+        button_frame = ttk.Frame(self.batch_tab)
+        button_frame.pack(fill=tk.X, pady=5)
+        
+        # Analyze button
+        ttk.Button(button_frame, text="Analyze Directory", command=self._analyze_directory).pack(side=tk.LEFT, padx=5)
+        
+        # Copy Results button
+        self.copy_batch_button = ttk.Button(button_frame, text="Copy Results", command=self._copy_batch_results, state=tk.DISABLED)
+        self.copy_batch_button.pack(side=tk.LEFT, padx=5)
+        
         # Results area
         self.batch_result = scrolledtext.ScrolledText(self.batch_tab, height=15)
         self.batch_result.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        # Analyze button
-        ttk.Button(self.batch_tab, text="Analyze Directory", command=self._analyze_directory).pack(pady=5)
+
+    def _copy_batch_results(self):
+        """Copy batch analysis results to clipboard"""
+        results = self.batch_result.get("1.0", tk.END).strip()
+        if results:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(results)
+            self.status_var.set("Results copied to clipboard")
+        else:
 
     def _analyze_text(self):
         text = self.text_input.get("1.0", tk.END).strip()
@@ -333,6 +350,7 @@ For more information, visit the project repository.
         self.status_var.set("Analyzing directory...")
         self.batch_result.delete("1.0", tk.END)
         self.batch_result.insert(tk.END, "Analyzing...\n")
+        self.copy_batch_button.config(state=tk.DISABLED)  # Disable copy button while analyzing
         
         def analyze():
             try:
@@ -376,6 +394,7 @@ For more information, visit the project repository.
                     self.batch_result.insert(tk.END, result)
                 self.status_var.set(f"Analysis complete. Processed {total_files} files.")
                 self._log_security_event("Batch Analysis", "Completed directory analysis")
+                self.copy_batch_button.config(state=tk.NORMAL)  # Enable copy button after analysis
             except Exception as e:
                 self._log_security_event("Error", str(e))
                 self.batch_result.delete("1.0", tk.END)
