@@ -232,6 +232,11 @@ For more information, visit the project repository.
         self.dir_path_var = tk.StringVar()
         ttk.Entry(dir_frame, textvariable=self.dir_path_var, state='readonly').pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         
+        # Progress bar
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(self.batch_tab, variable=self.progress_var, maximum=100)
+        self.progress_bar.pack(fill=tk.X, padx=5, pady=5)
+        
         # Results area
         self.batch_result = scrolledtext.ScrolledText(self.batch_tab, height=15)
         self.batch_result.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -332,33 +337,53 @@ For more information, visit the project repository.
         def analyze():
             try:
                 self._log_security_event("Batch Analysis", f"Starting analysis of directory: {dir_path}")
+                # Get list of text files
+                text_files = [f for f in os.listdir(dir_path) if f.endswith('.txt')]
+                total_files = len(text_files)
+                
+                if total_files == 0:
+                    self.batch_result.delete("1.0", tk.END)
+                    self.batch_result.insert(tk.END, "No text files found in the selected directory.")
+                    self.status_var.set("No text files found")
+                    return
+                
                 results = []
-                for filename in os.listdir(dir_path):
-                    if filename.endswith('.txt'):
-                        file_path = os.path.join(dir_path, filename)
-                        try:
-                            with open(file_path, 'r', encoding='utf-8') as file:
-                                text = file.read()
-                            label, confidence = self.detector.detect(text)
-                            results.append(f"{filename}: {label} (Confidence: {confidence:.2%})\n")
-                            self._log_security_event("File Analysis", f"Completed {filename}: {label} ({confidence:.2%})")
-                        except SecurityError as e:
-                            self._log_security_event("Security Error", f"{filename}: {str(e)}")
-                            results.append(f"{filename}: Security Error - {str(e)}\n")
-                        except Exception as e:
-                            self._log_security_event("Error", f"{filename}: {str(e)}")
-                            results.append(f"{filename}: Error - {str(e)}\n")
+                # Reset progress
+                self.progress_var.set(0)
+                
+                for i, filename in enumerate(text_files, 1):
+                    file_path = os.path.join(dir_path, filename)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as file:
+                            text = file.read()
+                        label, confidence = self.detector.detect(text)
+                        results.append(f"{filename}: {label} (Confidence: {confidence:.2%})\n")
+                        self._log_security_event("File Analysis", f"Completed {filename}: {label} ({confidence:.2%})")
+                    except SecurityError as e:
+                        self._log_security_event("Security Error", f"{filename}: {str(e)}")
+                        results.append(f"{filename}: Security Error - {str(e)}\n")
+                    except Exception as e:
+                        self._log_security_event("Error", f"{filename}: {str(e)}")
+                        results.append(f"{filename}: Error - {str(e)}\n")
+                    
+                    # Update progress
+                    progress = (i / total_files) * 100
+                    self.progress_var.set(progress)
+                    self.root.update_idletasks()
                 
                 self.batch_result.delete("1.0", tk.END)
                 for result in results:
                     self.batch_result.insert(tk.END, result)
-                self.status_var.set("Analysis complete")
+                self.status_var.set(f"Analysis complete. Processed {total_files} files.")
                 self._log_security_event("Batch Analysis", "Completed directory analysis")
             except Exception as e:
                 self._log_security_event("Error", str(e))
                 self.batch_result.delete("1.0", tk.END)
                 self.batch_result.insert(tk.END, f"Error: {str(e)}")
                 self.status_var.set("Error occurred")
+            finally:
+                # Reset progress bar
+                self.progress_var.set(0)
 
         threading.Thread(target=analyze).start()
 
